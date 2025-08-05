@@ -1,0 +1,90 @@
+openapi: 3.0.3
+info:
+  title: "BigQuery API Passthrough"
+  description: "A simple API service that acts as a passthrough to execute SQL queries on Google BigQuery. It is deployed on Google Cloud Run."
+  version: "1.0.0"
+servers:
+  - url: https://bq-api-service-kz5lpdkcca-uc.a.run.app
+    description: Deployed Cloud Run service
+paths:
+  /:
+    get:
+      summary: "Health Check"
+      description: "A simple health check endpoint to confirm the service is running and responsive."
+      operationId: "healthCheck"
+      tags:
+        - "Status"
+      responses:
+        '200':
+          description: "Service is healthy."
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "OK"
+  /query:
+    post:
+      summary: "Execute BigQuery Query"
+      description: "Accepts a SQL query in a JSON payload, executes it against Google BigQuery, and returns the results as a JSON array."
+      operationId: "executeQuery"
+      tags:
+        - "Query"
+      requestBody:
+        description: "JSON object containing the SQL query to execute."
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+      responses:
+        '200':
+          description: "Query executed successfully. Returns an array of result rows."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuerySuccessResponse'
+        '400':
+          description: "Bad Request. The request payload is invalid or the SQL query failed."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: "Internal Server Error. The server encountered an unexpected condition, such as not being able to connect to BigQuery."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    QueryRequest:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "The SQL query to be executed in BigQuery."
+          example: "SELECT name, state FROM `bigquery-public-data.usa_names.usa_1910_2013` WHERE state = 'TX' LIMIT 10"
+      required:
+        - query
+
+    QuerySuccessResponse:
+      type: array
+      description: "An array of objects, where each object represents a row from the query result. The object keys are the column names."
+      items:
+        type: object
+        additionalProperties: true
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: "A description of the error that occurred."
+          example: "Request body must be JSON with a 'query' key"
+
+  securitySchemes:
+    serviceAccountAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

@@ -1,0 +1,19 @@
+# Environment variables - !!DO NOT COMMIT THIS FILE!!
+.env
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+env/
+venv/
+
+# Editor/OS-specific
+.vscode/
+.codeoss/
+.idea/
+.DS_Store
