@@ -33,6 +33,7 @@ import os
 import httpx
 import asyncio
 import json
+import re
 import uuid
 
 # Enable detailed logging for the HTTP client to see request headers.
@@ -94,25 +95,44 @@ Current Schedule:
 OK. Here are the details for the 5 least busy team members over the next 3 weeks:
 
 *   **Abhilash Thumma**: Week of August 16, 2025: 18 hours across 3 projects (located in America/Chicago)
-*   **Hadrian Knotz**:
-    *   Week of August 16, 2025: 40 hours across 3 projects (located in America/Los_Angeles)
-    *   Week of August 23, 2025: 8 hours across 2 projects (located in America/Los_Angeles)
-*   **Sundar Mudupalli**:
-    *   Week of August 16, 2025: 25.6 hours across 3 projects (located in America/Los_Angeles)
+*   **Hadrian Knotz**: (located in America/Los_Angeles)
+    *   Week of August 16, 2025: 40 hours across 3 projects 
+    *   Week of August 23, 2025: 8 hours across 2 projects
+*   **Sundar Mudupalli**: (located in America/Los_Angeles)
+    *   Week of August 16, 2025: 25.6 hours across 3 projects 
 
 Your output should be:
 "Adding an extra 8h/w over the next 3 weeks would result in the following schedule for the 5 least busy team members:
 
 *   **Abhilash Thumma**: Week of August 16, 2025: 26 hours across 3 projects (located in America/Chicago)
-*   **Hadrian Knotz**:
-    *   Week of August 16, 2025: 48 hours across 3 projects (located in America/Los_Angeles)
-    *   Week of August 23, 2025: 16 hours across 2 projects (located in America/Los_Angeles)
-*   **Sundar Mudupalli**:
-    *   Week of August 16, 2025: 33.6 hours across 3 projects (located in America/Los_Angeles)"
+*   **Hadrian Knotz**: (located in America/Los_Angeles)
+    *   Week of August 16, 2025: 48 hours across 3 projects 
+    *   Week of August 23, 2025: 16 hours across 2 projects
+*   **Sundar Mudupalli**: (located in America/Los_Angeles)
+    *   Week of August 16, 2025: 33.6 hours across 3 projects"
 """,
     description="Adds a given number of hours to each team member's weekly schedule and formats the output.",
     tools=[],
     output_key="effort_update_result",
+)
+
+# --- 1c. Define Recommender Agent ---
+recommender_agent = LlmAgent(
+    name="EARecommenderAgent",
+    model=GEMINI_MODEL,
+    instruction="""- You are a senior manager for the Enterprise Architecture (EA) team.
+- Your task is to recommend the best candidates for a new assignment based on several factors.
+- You will be provided with the following information:
+    1.  An updated schedule showing team members' availability after adding the new assignment's hours.
+    2.  A list of team members who have previously worked for the account.
+    3.  A list of team members who are in a compatible timezone.
+- Based on this information, you must provide a ranked list of the top 3-5 candidates.
+- For each candidate, provide a brief justification for their ranking, considering their availability (lower hours are better), previous experience with the account (a strong plus), and timezone compatibility.
+- Present the final recommendation in a clear, easy-to-read format.
+""",
+    description="Recommends the best EA team members for an assignment based on availability, past experience, and timezone.",
+    tools=[],
+    output_key="recommender_result",
 )
 
 # --- 2. Create a tool from the BigQuery API OpenAPI spec ---
@@ -264,7 +284,7 @@ async def call_ea_team_info_agent(query: str, user_id: str, session_id: str):
                  error_message = event.error.message if event.error else "Unknown error"
                  if event.error and event.error.details:
                      error_message += f"\n     Details: {event.error.details}"
-                 print(f"  -> 🔴 Error from {author_name}: {error_message}")
+                 print(f"  -> ❌ Error from {author_name}: {error_message}")
 
         if final_response_text is None:
              print("<<< Pipeline finished but did not produce the expected final text response.")
@@ -409,14 +429,17 @@ async def call_ea_team_info_agent(query: str, user_id: str, session_id: str):
 
                         # 6. Run Effort Update Agent if applicable
                         ask_total_effort_str = plan_dict.get("ask_total_effort")
+                        ask_availability_str = plan_dict.get("ask_availability")
                         availability_result_str = extracted_answers.get("availability")
 
-                        if ask_total_effort_str and availability_result_str:
+                        if ask_total_effort_str and ask_availability_str and availability_result_str:
                             print("\n--- Running Effort Update Agent ---")
 
-                            # Append the schedule from the API call to the original request from the planner.
+                            # Use the planner's instruction as the core of the prompt, and combine it
+                            # with the formatting instructions and the data for the agent.
                             update_effort_query = f"""{ask_total_effort_str}
 
+Current Schedule:
 {availability_result_str}
 """
                             effort_runner = InMemoryRunner(agent=effort_update_agent, app_name=APP_NAME)
@@ -438,10 +461,52 @@ async def call_ea_team_info_agent(query: str, user_id: str, session_id: str):
                             if effort_response_text:
                                 print(f"\n--- Updated Effort from {effort_update_agent.name} ---")
                                 print(effort_response_text)
+
+                                # 7. Run Recommender Agent
+                                print("\n--- Running Recommender Agent ---")
+
+                                past_involvement_str = extracted_answers.get("past_involvement", "No information available.")
+                                timezone_match_str = extracted_answers.get("timezone_match", "No information available.")
+
+                                recommender_query = f"""Based on the following information, please recommend the best candidates for the assignment.
+
+1. Updated Schedule:
+{effort_response_text}
+
+2. Past Involvement with the Account:
+{past_involvement_str}
+
+3. Timezone Compatibility:
+{timezone_match_str}
+
+Provide a ranked list of the top candidates with your reasoning.
+"""
+
+                                recommender_runner = InMemoryRunner(agent=recommender_agent, app_name=APP_NAME)
+                                recommender_session_id = f"recommender-{session_id}"
+                                await recommender_runner.session_service.create_session(
+                                    app_name=APP_NAME, user_id=user_id, session_id=recommender_session_id
+                                )
+
+                                recommender_content = types.Content(role='user', parts=[types.Part(text=recommender_query)])
+                                recommender_response_text = None
+
+                                async for event in recommender_runner.run_async(
+                                    user_id=user_id, session_id=recommender_session_id, new_message=recommender_content
+                                ):
+                                    if event.is_final_response() and event.author == recommender_agent.name and event.content and event.content.parts:
+                                        recommender_response_text = event.content.parts[0].text.strip()
+                                        break
+
+                                if recommender_response_text:
+                                    print(f"\n--- Final Recommendation from {recommender_agent.name} ---")
+                                    print(recommender_response_text)
+                                else:
+                                    print("<<< Recommender agent did not produce a response.")
                             else:
                                 print("<<< Effort update agent did not produce a response.")
                     else:
-                        print("No questions to ask the agent.")
+                        print("No questions to ask the backend API.")
 
             except Exception as e:
                 print(f"\n❌ An error occurred during API invocation: {e}")
