@@ -60,13 +60,13 @@ planner_agent = LlmAgent(
     - The list of questions to ask to gather all the knowledge required to make an assignment are below. The key parameters provided by the user are written in all capital letters. If the ACCOUNT_TIMEZONE is not specified, leave out question (4).
         - 1) What are the detailed information for the 7 least busy members of the team over the next NUMBER_OF_WEEKS?
         - 2) Add NUMBER_OF_HOURS_PER_WEEK to the assignments for each week of each team member
-        - 3) Did anyone from the team already worked for ACCOUNT_NAME over the past 2 years?
+        - 3) Who from the team already worked for ACCOUNT_NAME over the past 2 years, if anyone?
         - 4) Who lives within 1 hour of the ACCOUNT_TIMEZONE?
 - Present the results only providing the questions without any introduction or closure information. For example, for a question like "I have an opportunity with Motorola for 8h/w for 3 weeks in the central timezone", you shoould return the following
 - "
 - 1) What are the detailed information for the 7 least busy members of the team over the next 3 weeks?
 - 2) Add 8 hours per week to the assignments for each week of each team member
-- 3) Did anyone from the team already worked for Motorola over the past 2 years?
+- 3) Who from the team already worked for motorola over the past 2 years, if anyone?
 - 4) Who lives within 1 hour of the central timezone?
 - "
 """,
@@ -357,7 +357,6 @@ async def call_ea_team_info_agent(query: str, user_id: str, session_id: str):
                             raise Exception("Aborting due to critical API call failures.")
 
                         # This part only runs if all calls were successful.
-                        print("\n--- Extracted Answers ---")
                         extracted_answers = {}
                         for task_name, json_response in success_results.items():
                             # Safely extract the text from the nested response message
