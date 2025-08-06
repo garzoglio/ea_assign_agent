@@ -58,13 +58,13 @@ planner_agent = LlmAgent(
     instruction="""- You are a manager for the Enterprise Architecture (EA) team. A user can present you with questions related to the team or with a new opportunity for assignment.
 - When presented with a new opportunity, you want to plan the list of the questions necessary to find the best fit for the job from the EA team. Ideally the user should provide the name of the account, the target number of hours per week for the assignment, the duration of the assignment, optionally the timezone of the account.
     - The list of questions to ask to gather all the knowledge required to make an assignment are below. The key parameters provided by the user are written in all capital letters. If the ACCOUNT_TIMEZONE is not specified, leave out question (4).
-        - 1) What are the detailed information for the 7 least busy members of the team over the next NUMBER_OF_WEEKS?
+        - 1) What are the detailed information for the 5 least busy members of the team over the next NUMBER_OF_WEEKS?
         - 2) Add NUMBER_OF_HOURS_PER_WEEK to the assignments for each week of each team member
         - 3) Who from the team already worked for ACCOUNT_NAME over the past 2 years, if anyone?
         - 4) Who lives within 1 hour of the ACCOUNT_TIMEZONE?
 - Present the results only providing the questions without any introduction or closure information. For example, for a question like "I have an opportunity with Motorola for 8h/w for 3 weeks in the central timezone", you shoould return the following
 - "
-- 1) What are the detailed information for the 7 least busy members of the team over the next 3 weeks?
+- 1) What are the detailed information for the 5 least busy members of the team over the next 3 weeks?
 - 2) Add 8 hours per week to the assignments for each week of each team member
 - 3) Who from the team already worked for motorola over the past 2 years, if anyone?
 - 4) Who lives within 1 hour of the central timezone?
@@ -74,6 +74,45 @@ planner_agent = LlmAgent(
     tools=[],
     # Store result in state for the merger agent
     output_key="ea_assignment_plan_result"
+)
+
+# --- 1b. Define Effort Update Agent ---
+effort_update_agent = LlmAgent(
+    name="EffortUpdateAgent",
+    model=GEMINI_MODEL,
+    instruction="""- You are an assistant that updates team member schedules.
+- You will be given a current schedule and a request to add a specific number of hours to each weekly assignment for each person.
+- Your task is to find every mention of hours in the schedule, parse the number, add the requested number of hours to it, and replace the old number with the new total.
+- You must present the updated schedule in the exact same format as the input schedule.
+- You will also be given a specific introductory sentence to start your response with. Use that sentence verbatim.
+
+For example, if the request is:
+"Based on the following schedule, add 8 hours to each weekly assignment for each person."
+Present the result in the same format, starting with the phrase: "Adding an extra 8h/w over the next 3 weeks would result in the following schedule for the 5 least busy team members:"
+
+Current Schedule:
+OK. Here are the details for the 5 least busy team members over the next 3 weeks:
+
+*   **Abhilash Thumma**: Week of August 16, 2025: 18 hours across 3 projects (located in America/Chicago)
+*   **Hadrian Knotz**:
+    *   Week of August 16, 2025: 40 hours across 3 projects (located in America/Los_Angeles)
+    *   Week of August 23, 2025: 8 hours across 2 projects (located in America/Los_Angeles)
+*   **Sundar Mudupalli**:
+    *   Week of August 16, 2025: 25.6 hours across 3 projects (located in America/Los_Angeles)
+
+Your output should be:
+"Adding an extra 8h/w over the next 3 weeks would result in the following schedule for the 5 least busy team members:
+
+*   **Abhilash Thumma**: Week of August 16, 2025: 26 hours across 3 projects (located in America/Chicago)
+*   **Hadrian Knotz**:
+    *   Week of August 16, 2025: 48 hours across 3 projects (located in America/Los_Angeles)
+    *   Week of August 23, 2025: 16 hours across 2 projects (located in America/Los_Angeles)
+*   **Sundar Mudupalli**:
+    *   Week of August 16, 2025: 33.6 hours across 3 projects (located in America/Los_Angeles)"
+""",
+    description="Adds a given number of hours to each team member's weekly schedule and formats the output.",
+    tools=[],
+    output_key="effort_update_result",
 )
 
 # --- 2. Create a tool from the BigQuery API OpenAPI spec ---
@@ -257,7 +296,9 @@ async def call_ea_team_info_agent(query: str, user_id: str, session_id: str):
 
             # The base URL for the Dialogflow detectIntent API.
             # A new session ID will be generated for each invocation.
-            api_base_url = "https://us-central1-dialogflow.googleapis.com/v3/projects/test-project-26133-466015/locations/us-central1/agents/1c65d0de-61de-4528-9f4f-4c8661848b9f"
+            # DF Agent: EA Info Assistant Task
+            #  Playbook: EA Info Assistant Task Playbook
+            api_base_url = "https://us-central1-dialogflow.googleapis.com/v3/projects/test-project-26133-466015/locations/us-central1/agents/4812b694-5a2a-4b40-8736-8224627b7e80"
 
             # The project ID to use for quota and billing. This is required when using
             # user credentials (Application Default Credentials) to call Google Cloud APIs.
@@ -362,11 +403,45 @@ async def call_ea_team_info_agent(query: str, user_id: str, session_id: str):
                             # Safely extract the text from the nested response message
                             answer_text = json_response.get("queryResult", {}).get("responseMessages", [{}])[0].get("text", {}).get("text", [""])[0]
                             extracted_answers[task_name] = answer_text.strip() if answer_text else "No answer text found in response."
-
-                        print("\n--- Extracted Answers ---")
+                        
+                        print("\n--- Extracted Answers from APIs ---")
                         print(json.dumps(extracted_answers, indent=2))
+
+                        # 6. Run Effort Update Agent if applicable
+                        ask_total_effort_str = plan_dict.get("ask_total_effort")
+                        availability_result_str = extracted_answers.get("availability")
+
+                        if ask_total_effort_str and availability_result_str:
+                            print("\n--- Running Effort Update Agent ---")
+
+                            # Append the schedule from the API call to the original request from the planner.
+                            update_effort_query = f"""{ask_total_effort_str}
+
+{availability_result_str}
+"""
+                            effort_runner = InMemoryRunner(agent=effort_update_agent, app_name=APP_NAME)
+                            effort_session_id = f"effort-update-{session_id}"
+                            await effort_runner.session_service.create_session(
+                                app_name=APP_NAME, user_id=user_id, session_id=effort_session_id
+                            )
+
+                            effort_content = types.Content(role='user', parts=[types.Part(text=update_effort_query)])
+                            effort_response_text = None
+
+                            async for event in effort_runner.run_async(
+                                user_id=user_id, session_id=effort_session_id, new_message=effort_content
+                            ):
+                                if event.is_final_response() and event.author == effort_update_agent.name and event.content and event.content.parts:
+                                    effort_response_text = event.content.parts[0].text.strip()
+                                    break
+                            
+                            if effort_response_text:
+                                print(f"\n--- Updated Effort from {effort_update_agent.name} ---")
+                                print(effort_response_text)
+                            else:
+                                print("<<< Effort update agent did not produce a response.")
                     else:
-                        print("No questions to ask the backend API.")
+                        print("No questions to ask the agent.")
 
             except Exception as e:
                 print(f"\n❌ An error occurred during API invocation: {e}")
