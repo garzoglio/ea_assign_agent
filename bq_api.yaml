@@ -29,6 +29,13 @@ paths:
       operationId: "executeQuery"
       tags:
         - "Query"
+      parameters:
+        - in: header
+          name: x-goog-user-project
+          schema:
+            type: string
+          required: true
+          description: Project information to properly account API quota
       requestBody:
         description: "JSON object containing the SQL query to execute."
         required: true

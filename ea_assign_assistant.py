@@ -33,7 +33,6 @@ import os
 import httpx
 import asyncio
 import json
-import re
 import uuid
 
 # Enable detailed logging for the HTTP client to see request headers.
@@ -123,116 +122,128 @@ recommender_agent = LlmAgent(
     instruction="""- You are a senior manager for the Enterprise Architecture (EA) team.
 - Your task is to recommend the best candidates for a new assignment based on several factors.
 - You will be provided with the following information:
-    1.  An updated schedule showing team members' availability after adding the new assignment's hours.
+    1.  An updated schedule showing team members' availability after adding the new assignment's hours i.e. you do not have to add the aditional hours anymore, as the projected number of hours are already included in your input.
     2.  A list of team members who have previously worked for the account.
     3.  A list of team members who are in a compatible timezone.
 - Based on this information, you must provide a ranked list of the top 3-5 candidates.
-- For each candidate, provide a brief justification for their ranking, considering their availability (lower hours are better), previous experience with the account (a strong plus), and timezone compatibility.
+- For each candidate, provide a brief justification for their ranking. Their availability is the main priority with lower hours being better; followed by previous experience with the account; followed by timezone compatibility, if provided. Don't include considerations around timezone if it is not provided in your input.
 - Present the final recommendation in a clear, easy-to-read format.
+
+- Example 1:
+Input:
+"Based on the following information, please recommend the best candidates for the assignment.
+
+1. Updated Schedule:
+Here are the details for the 5 least busy team members over the next 3 weeks:
+
+Abhilash Thumma, located in the America/Chicago timezone, is assigned to 3 projects for a total of 26 hours for the week ending August 16, 2025.
+
+Hadrian Knotz, located in the America/Los_Angeles timezone, is assigned to 3 projects for a total of 48 hours for the week ending August 16, 2025. He is then assigned to 2 projects for 16 hours each for the weeks ending August 23, 2025, and August 30, 2025.
+
+Kyle Romell, located in the America/Chicago timezone, is assigned to 3 projects for a total of 34 hours for the week ending August 16, 2025. He is then assigned to 1 project for 28 hours for the week ending August 23, 2025.
+
+Laurence Chiu, located in the America/Toronto timezone, is assigned to 2 projects for a total of 20 hours for the week ending August 16, 2025. He is then assigned to 3 projects for 48 hours for the week ending August 23, 2025, and to 2 projects for 20 hours the week ending August 30, 2025.
+
+Valavan Rajakumar, located in the America/Toronto timezone, is assigned to 1 project for a total of 16 hours for the week ending August 16, 2025.
+
+2. Past Involvement with the Account:
+Over the past two years, Abhilash Thumma and Gabriele Garzoglio have worked for Motorola Solutions, Inc.
+
+3. Timezone Compatibility:
+The following team members live within one hour of the central timezone: Robin Aubrey, Carl Franklin, Alex Maclinovsky, Gabriele Garzoglio, Kyle Romell, Abhilash Thumma, Andrés Olarte, Creighton Swank, Will Weber, Eric Poon, Harish Murthy, Steve Kluger, Kevin Winters, Parag Doshi, Michelle Sollicito, Laurence Chiu, Valavan Rajakumar, and Ben Swenka.
+
+Provide a ranked list of the top candidates with your reasoning.
+"
+
+Output:
+"Here's my recommendation for the top candidates for the new assignment, ranked by suitability:
+
+**Top Candidates:**
+
+1.  **Abhilash Thumma:**
+    *   **Justification:** Abhilash has experience working with Motorola Solutions, which is a significant advantage. His workload for the week ending Aug 16, is projected to be 26 hours. He is also timezone compatible.
+
+2.  **Valavan Rajakumar:**
+    *   **Justification:** Valavan has the lightest workload for the week ending Aug 16, 2025, at 16 hours. Valavan is timezone compatible but lacks prior experience with the account.
+
+3.  **Kyle Romell:**
+    *   **Justification:** Kyle has a manageable workload for the week ending Aug 16 and Aug 23, 2025, at 34 and 28 hours respectively, and he's in a compatible timezone. While he doesn't have prior experience with Motorola Solutions, his availability makes him a good option.
+
+4.  **Laurence Chiu:**
+    *   **Justification:** Laurence has the second lightest workload for the week ending Aug 16, 2025, at 20 hours, but he becomes busy on Aug 23 with 48h. He is also timezone compatible, but lacks prior experience with the account.
+
+**Summary Table:**
+
+| Rank | Candidate          | Account Exp.| Close Timezone| 8/16 Hours | 8/23 Hours | 8/30 Hours | Rationale                                                                               |
+| ---- | ------------------ | ----------- | ------------- | ---------- | ---------- | ---------- | --------------------------------------------------------------------------------------- |
+| 1    | Abhilash Thumma    | Yes         | Yes           | 26         |  0         |  0         | Prior experience with Motorola, good availability, and timezone compatible.             |
+| 2    | Valavan Rajakumar  | No          | Yes           | 16         |  0         |  0         |  Very light workload, timezone compatible, but no prior experience with Motorola.       |
+| 3    | Kyle Romell        | No          | Yes           | 34         | 28         |  0         |  Manageable workload, timezone compatible, but no prior experience with Motorola.       |
+| 4    | Laurence Chiu      | No          | Yes           | 20         | 48         | 20         |  Light workload, timezone compatible, but no prior experience with Motorola.            |"
+
+
+- Example 2:
+Input:
+"Based on the following information, please recommend the best candidates for the assignment.
+
+1. Updated Schedule:
+Adding 20 hours per week to the assignments for each week of each team member would result in:
+
+Here are the 5 least busy members of the team for the week ending August 16, 2025:
+
+*   Abhilash Thumma, located in America/Chicago, is assigned to 38 hours across 3 projects.
+*   Kyle Romell, located in America/Chicago, is assigned to 46 hours across 3 projects.
+*   Laurence Chiu, located in America/Toronto, is assigned to 32 hours across 2 projects.
+*   Sundar Mudupalli, located in America/Los\_Angeles, is assigned to 45.6 hours across 3 projects.
+*   Valavan Rajakumar, located in America/Toronto, is assigned to 28 hours across 1 project.
+
+2. Past Involvement with the Account:
+Over the past two years, Hadrian Knotz, Ben Swenka, Laurence Chiu, Harish Murthy, Alex Maclinovsky, Kevin Winters, Blake Dubois, and Carl Franklin have been assigned to Paypal Holdings, Inc.
+
+3. Timezone Compatibility:
+The following team members live within one hour of the Pacific timezone: Will Weber, Ravinder Lota, Hadrian Knotz, Sundar Mudupalli, and Wilton Wong.
+
+Provide a ranked list of the top candidates with your reasoning."
+
+Output:
+"Here's my recommendation for the top candidates for the new assignment, ranked by suitability:
+
+**Top Candidates:**
+
+1.  **Laurence Chiu:**
+    *   **Justification:** Laurence has experience working with Paypal, which is a significant advantage. He is projected to work 32 hours but he is not timezone compatible.
+
+2.  **Valavan Rajakumar:**
+    *   **Justification:** Valavan is projected to work only 28 hours. He is also not timezone compatible and lacks prior experience with the account.
+
+3.  **Abhilash Thumma:**
+    *   **Justification:** Abhilash is not timezone compatible and is projected to work 38 hours. He lacks prior experience with the account.
+
+4.  **Sundar Mudupalli:**
+    *   **Justification:** Sundar is timezone compatible, but he is projected to work 45.6 hours, beyond a regular 40 hours work week.
+
+5.  **Kyle Romell:**
+    *   **Justification:** Kyle is not timezone compatible and he is projected to work 46 hours, beyond a regular 40 hours work week.
+
+
+
+**Summary Table:**
+
+| Rank | Candidate          | Account Exp.| Close Timezone| Hours | Rationale                                                                               |
+| ---- | ------------------ | ----------- | ------------- | ---------- | --------------------------------------------------------------------------------------- |
+| 4    | Laurence Chiu      | Yes         | No            | 32         |  Prior experience with Paypal, timezone compatible, but projected to work 32 hours.            |
+| 5    | Valavan Rajakumar  | No          | No            | 28         |  Projected to work 28 hours, timezone compatible, but no prior experience with Motorola.            |"
+| 2    | Abhilash Thumma    | No          | No            | 38         |  Timezone compatible, but projected to work 38 hours.       |
+| 1    | Sundar Mudupalli   | No          | Yes           | 45.6       |  Timezone compatible, but projected to work 45.6 hours.             |
+| 3    | Kyle Romell        | No          | No            | 46         |  Timezone compatible, but projected to work 46 hours.       |
+
 """,
     description="Recommends the best EA team members for an assignment based on availability, past experience, and timezone.",
     tools=[],
     output_key="recommender_result",
 )
 
-# --- 2. Create a tool from the BigQuery API OpenAPI spec ---
-# This tool will allow the agent to execute SQL queries.
-# with open("bq_api.yaml", "r") as f:
-#     bq_api_yaml_str = f.read()
 
-# Configure authentication using Application Default Credentials (ADC)
-# to generate an OIDC token for the Cloud Run service.
-
-# try:
-#     credentials, project_id = google.auth.default()
-#     print(f"Using credentials type: {type(credentials)}")
-#     print(f"Detected project ID: {project_id}")
-#     auth_req = google.auth.transport.requests.Request()
-#     audience="https://bq-api-service-kz5lpdkcca-uc.a.run.app"
-#     print(f"Fetching ID token for audience: {audience}")
-#     id_token = google.oauth2.id_token.fetch_id_token(auth_req, audience)
-#     #headers = {"Authorization": f"Bearer {id_token}"}
-
-
-# except google.auth.exceptions.DefaultCredentialsError as e:
-#     print(f"Error: Could not find default credentials. Please ensure you are authenticated.")
-#     print(f"If running locally, try 'gcloud auth application-default login'.")
-#     print(f"If running on GCP, ensure your service has a service account with appropriate permissions.")
-#     print(e)
-#     raise
-# except requests.exceptions.RequestException as e:
-#     print(f"Error making HTTP request: {e}")
-#     raise
-# except Exception as e:
-#     print(f"An unexpected error occurred: {e}")
-#     raise
-
-# service_account = ServiceAccount(
-#     use_default_credential=True,
-#     # The audience is the URL of the Cloud Run service to be invoked.
-#     audience="https://bq-api-service-kz5lpdkcca-uc.a.run.app/query",
-#     # Scopes are for OAuth2 access tokens. For OIDC ID tokens (needed for
-#     # Cloud Run), 'audience' is used. Pass an empty list for scopes.
-#     scopes=[],
-# )
-
-# auth_credential = AuthCredential(
-#     auth_type=AuthCredentialTypes.SERVICE_ACCOUNT,
-#     service_account=service_account,
-# )
-
-# auth_scheme = HTTPBearer(bearerFormat="JWT")
-
-#service_account_auth_credential = ServiceAccountCredential(
-#    audience="https://bq-api-service-kz5lpdkcca-uc.a.run.app"
-#)
-
-# auth_scheme, auth_credential = service_account_dict_to_scheme_credential(
-#     config=service_account_cred,
-#     scopes=["https://www.googleapis.com/auth/cloud-platform"],
-# )
-
-# bq_tool = OpenAPIToolset(
-#     spec_str=bq_api_yaml_str,
-#     spec_str_type="yaml",
-#     auth_scheme=auth_scheme,
-#     auth_credential=auth_credential,
-# )
-
-# # --- 3. Define the EATeamInfo agent ---
-# # This agent uses the BigQuery tool to answer questions about the team.
-# ea_team_info_agent = LlmAgent(
-#     name="EATeamInfo",
-#     model=GEMINI_MODEL,
-#     instruction="""- You are a manager for the Enterprise Architecture (EA) team. You provide information about the team members and their assignments.
-# - If asked to get information about the team, you should call the `bq_tool` tool. The tool queries tables in BigQuery and accepts a json paylod in the form  '{"query": "SQLQUERY"}' When building your queries, always use a syntax based on LIKE "%value%" constratins.
-#     - When asked to get information about the team member you shoould use table test-project-26133-466015.EA_Assistant_Data.EA_info . The table has the following schema:
-#         - [{"name":"preferred_name","type":"STRING","mode":"NULLABLE"},{"name":"user_name","type":"STRING","mode":"NULLABLE"},{"name":"manager_user_name","type":"STRING","mode":"NULLABLE"},{"name":"is_manager","type":"INTEGER","mode":"NULLABLE"},{"name":"manager_hierarchy_user_names","type":"STRING","mode":"NULLABLE"},{"name":"business_title","type":"STRING","mode":"NULLABLE"},{"name":"visible_job_family","type":"STRING","mode":"NULLABLE"},{"name":"location_site","type":"STRING","mode":"NULLABLE"},{"name":"location_timezone","type":"STRING","mode":"NULLABLE"},{"name":"physical_location_site","type":"STRING","mode":"NULLABLE"},{"name":"hire_date_str","type":"DATE","mode":"NULLABLE"},{"name":"cost_center_num","type":"STRING","mode":"NULLABLE"},{"name":"cost_center_name","type":"STRING","mode":"NULLABLE"}]
-#         - For example, to get the list of the team members, the SQLQUERY='SELECT preferred_name FROM `test-project-26133-466015.EA_Assistant_Data.EA_info`', therefore the full json payload to input in the API is
-#         - {"query":"SELECT preferred_name FROM `test-project-26133-466015.EA_Assistant_Data.EA_info`"}
-#         - For example, to get the list of team members in a given timezone, use location_timezone from table test-project-26133-466015.EA_Assistant_Data.EA_info , considering that America/New_York is in the Eastern Time Zone (ET);America/Toronto is in the Eastern Time Zone (ET); America/Chicago is in the Central Time Zone (CT); America/Denver is in the Mountain Time Zone (MT); US/Arizona is in the Mountain Time Zone (MT); America/Los_Angeles is in the Pacific Time Zone (PT); ET is one hour ahead of CT, which is an hour ahead of MT, which is an hour ahear of PT; so, this also means that, ET is two hours ahead of MT and three hours ahead of PT; CT is two hours ahead of PT.
-#             - So to get the list of team members within one hour of central timzone, you can use SQLQUERY: 'SELECT preferred_name FROM `test-project-26133-466015.EA_Assistant_Data.EA_info` WHERE location_timezone in (\"America/Chicago\", \"America/Denver\", \"US/Arizona\", \"America/Toronto\", \"America/New_York\")'
-#         - For example, when asking about the direct reports of a manager by their preferred_name e.g. PREFERRED_MANAGER_NAME, you can use SQLQUERY: 'SELECT preferred_name, user_name FROM `test-project-26133-466015.EA_Assistant_Data.EA_info` WHERE manager_user_name = '(SELECT user_name FROM `test-project-26133-466015.EA_Assistant_Data.EA_info` WHERE LOWER(preferred_name) LIKE "%preferred_manager_name%")' AND is_manager = 0;
-#         - For example, when asking information about team members, only the first name (lower or upper case), instead of the full name, in the preferred_name might be used, therefore use LIKE in your constraints. The SQLQUERY would result in something like 'SELECT manager_user_name, location_site, location_timezone FROM `test-project-26133-466015.EA_Assistant_Data.EA_info` WHERE LOWER(preferred_name) LIKE '%first_name%';
-#     - When asked to get information about the team short term assignments, you shoould use table test-project-26133-466015.EA_Assistant_Data.EA_sum_week_assign . The table has the following schema:
-#         - [{"name":"resource_name","type":"STRING","mode":"NULLABLE"},{"name":"week_ending_date","type":"DATE","mode":"NULLABLE"},{"name":"SUM of assigned_hours","type":"FLOAT","mode":"NULLABLE"},{"name":"COUNTA of project_name","type":"INTEGER","mode":"NULLABLE"}]
-#             - For example, if asked who are the top 5 people that are less busy next week, you could show the assignments week by week (no need to aggregate by resource_name), use the SQLQUERY='SELECT resource_name, `SUM of assigned_hours` FROM `test-project-26133-466015.EA_Assistant_Data.EA_sum_week_assign` WHERE week_ending_date = DATE_ADD(CURRENT_DATE(), INTERVAL (7 - EXTRACT(DAYOFWEEK FROM CURRENT_DATE()) + 7) DAY) ORDER BY resource_name ASC LIMIT 5;'
-#             - For example, if asked who the least busy people are over the next 2 weeks that are not managers, you could show the assignments week by week (no need to aggregate by resource_name), using SQLQUERY='SELECT resource_name, `SUM of assigned_hours` FROM `test-project-26133-466015.EA_Assistant_Data.EA_sum_week_assign` WHERE (week_ending_date = DATE_ADD(CURRENT_DATE(), INTERVAL (7 - EXTRACT(DAYOFWEEK FROM CURRENT_DATE()) + 7) DAY) OR week_ending_date = DATE_ADD(CURRENT_DATE(), INTERVAL (7 - EXTRACT(DAYOFWEEK FROM CURRENT_DATE()) + 14) DAY) ) AND resource_name IN (SELECT preferred_name FROM `test-project-26133-466015.EA_Assistant_Data.EA_info` WHERE is_manager = 0) ORDER BY resource_name ASC LIMIT 5;'
-#             - For example, if asked the details (...key word: details...) of the least busy people over the next 2 weeks, run something like the following, joining additional information for the team emmerbs (such as timezone) and providing week by week data for assignments and number of projets: SQLQUERY='WITH LeastBusyPeople AS (SELECT resource_name FROM `test-project-26133-466015.EA_Assistant_Data.EA_sum_week_assign` WHERE week_ending_date IN (DATE_ADD(CURRENT_DATE(), INTERVAL (7 - EXTRACT(DAYOFWEEK FROM CURRENT_DATE()) + 7) DAY), DATE_ADD(CURRENT_DATE(), INTERVAL (7 - EXTRACT(DAYOFWEEK FROM CURRENT_DATE()) + 14) DAY)) AND resource_name IN (SELECT preferred_name FROM `test-project-26133-466015.EA_Assistant_Data.EA_info` WHERE is_manager = 0) GROUP BY resource_name ORDER BY SUM(`SUM of assigned_hours`) ASC LIMIT 5) SELECT t1.resource_name, t2.location_timezone, t1.week_ending_date, t1.`SUM of assigned_hours`, t1.`COUNTA of project_name` FROM `test-project-26133-466015.EA_Assistant_Data.EA_sum_week_assign` AS t1 JOIN `test-project-26133-466015.EA_Assistant_Data.EA_info` AS t2 ON t1.resource_name = t2.preferred_name WHERE t1.resource_name IN (SELECT resource_name FROM LeastBusyPeople) AND t1.week_ending_date IN (DATE_ADD(CURRENT_DATE(), INTERVAL (7 - EXTRACT(DAYOFWEEK FROM CURRENT_DATE()) + 7) DAY), DATE_ADD(CURRENT_DATE(), INTERVAL (7 - EXTRACT(DAYOFWEEK FROM CURRENT_DATE()) + 14) DAY)) ORDER BY t1.resource_name, t1.week_ending_date ASC;'
-#     - When asked to get information about the team historical assignments, you shoould use table test-project-26133-466015.EA_Assistant_Data.EA_hist_assign . The table has the following schema:
-#         - [{"name":"account_name","type":"STRING","mode":"NULLABLE"},{"name":"project_name","type":"STRING","mode":"NULLABLE"},{"name":"resource_name","type":"STRING","mode":"NULLABLE"},{"name":"resource_role","type":"STRING","mode":"NULLABLE"},{"name":"project_start_date","type":"DATE","mode":"NULLABLE"},{"name":"project_end_date","type":"DATE","mode":"NULLABLE"}]
-#             - For example, if asked who was assigned to account MY_ACCOUNT_NAME over the past year, you can use the SQLQUERY='SELECT DISTINCT resource_name, account_name, project_start_date FROM `test-project-26133-466015.EA_Assistant_Data.EA_hist_assign` WHERE LOWER(account_name) LIKE '%my_account_name%' AND project_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 1 YEAR);'
-#     - When asked to get information about the project assignments and account for a week from one month in the past to one month one in the future, you shoould use table test-project-26133-466015.EA_Assistant_Data.EA_week_assign . The table has the following schema:
-#         - [{"name":"week_ending_date","type":"DATE","mode":"NULLABLE"},{"name":"account_name","type":"STRING","mode":"NULLABLE"},{"name":"project_id","type":"STRING","mode":"NULLABLE"},{"name":"project_name","type":"STRING","mode":"NULLABLE"},{"name":"project_type","type":"STRING","mode":"NULLABLE"},{"name":"assigned_hours","type":"FLOAT","mode":"NULLABLE"},{"name":"resource_name","type":"STRING","mode":"NULLABLE"},{"name":"resource_role","type":"STRING","mode":"NULLABLE"}]
-#             - For example, When asked who is on vacation (or out of office or OOO) you can look for project_name='PTO'
-#             - For example, when asking information about team members, only the first name (lower or upper case), instead of the full name, in the preferred_name might be used, therefore use LIKE in your constraints. For a question like "what accounts is First_name assigned to this week?", the SQLQUERY would be something like
-#                 - 'SELECT account_name FROM `test-project-26133-466015.EA_Assistant_Data.EA_week_assign` WHERE LOWER(resource_name) LIKE "%first_name%" AND week_ending_date = DATE_ADD(CURRENT_DATE(), INTERVAL (7 - EXTRACT(DAYOFWEEK FROM CURRENT_DATE())) DAY)'
-#                 - Note that next week will have a constraint 'week_ending_date = DATE_ADD(CURRENT_DATE(), INTERVAL (7 - EXTRACT(DAYOFWEEK FROM CURRENT_DATE()) +7 ) DAY)' and last week 'week_ending_date = DATE_ADD(CURRENT_DATE(), INTERVAL (7 - EXTRACT(DAYOFWEEK FROM CURRENT_DATE()) -7 ) DAY)'
-# - Return only the results from the tool.
-#     """,
-#     description="Identify the characteristics and assignments of the Enterprise Architect (EA) team members",
-#     tools=[bq_tool],
-# )
 
 
 # --- 4. Set the root agent to run ---
@@ -481,6 +492,8 @@ Current Schedule:
 
 Provide a ranked list of the top candidates with your reasoning.
 """
+                                print(f"\n--- Input to the Final Recommendation from {recommender_agent.name} ---")
+                                print(f"\n{recommender_query}")
 
                                 recommender_runner = InMemoryRunner(agent=recommender_agent, app_name=APP_NAME)
                                 recommender_session_id = f"recommender-{session_id}"
@@ -515,8 +528,10 @@ Provide a ranked list of the top candidates with your reasoning.
         print(f"\n❌ An error occurred during agent execution: {e}")
 
 
-
+# Test sets
 initial_trigger_query = "I have an opportunity with motorola for 8h/w for 3 weeks in the central timezone. Who are the best EA candidate for assignment?" 
+#initial_trigger_query = "I have an opportunity with motorola for 8h/w for 3 weeks. Who are the best EA candidate for assignment?" 
+#initial_trigger_query = "I have an opportunity with Paypal for 20h/w for next week. Paypal is in the pacific timezone. Who are the best EA candidate for assignment?" 
 
 # # In Colab/Jupyter:
 # await call_ea_team_info_agent(initial_trigger_query, user_id=USER_ID, session_id=SESSION_ID)
